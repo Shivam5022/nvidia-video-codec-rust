@@ -6,11 +6,10 @@ bindgen \
     --allowlist-function cuvid.* \
     --allowlist-var \[IPBS\]_VOP \
     --allowlist-var cuvid.* \
-    --blocklist-file .*/cuda\\.h \
-    --blocklist-file .*/std.*\\.h \
     --must-use-type CUresult \
     --must-use-type cuvidDecodeStatus \
-    \
+    --blocklist-file .*/cuda\\.h \
+    --blocklist-file .*/std.*\\.h \
     --default-enum-style=rust \
     --no-doc-comments \
     --with-derive-default \
@@ -20,7 +19,7 @@ bindgen \
     --use-core \
     --merge-extern-blocks \
     --sort-semantically \
-    --output cuviddec.rs ../headers/cuviddec.h
+    --output cuviddec.rs ../headers/cuviddec.h -- -I/usr/local/cuda-12.8/include
 
 bindgen \
     --allowlist-type CU.* \
@@ -43,7 +42,7 @@ bindgen \
     --use-core \
     --merge-extern-blocks \
     --sort-semantically \
-    --output nvcuvid.rs ../headers/nvcuvid.h
+    --output nvcuvid.rs ../headers/nvcuvid.h -- -I/usr/local/cuda-12.8/include
 
 bindgen \
     --allowlist-type NVENC.* \
@@ -71,7 +70,7 @@ bindgen \
     --use-core \
     --merge-extern-blocks \
     --sort-semantically \
-    --output nvEncodeAPI.rs ../headers/nvEncodeAPI.h
+    --output nvEncodeAPI.rs ../headers/nvEncodeAPI.h -- -I/usr/local/cuda-12.8/include
 
 # Additional preludes to make sure the bindings compile.
 echo -e "use cudarc::driver::sys::*;\n$(cat cuviddec.rs)" > cuviddec.rs
