@@ -56,9 +56,9 @@ const LIBRARY_CANDIDATES: [&str; 11] = [
 ];
 
 fn main() {
-    if cfg!(feature = "ci-check") {
-        return;
-    }
+    // if cfg!(feature = "ci-check") {
+    //     return;
+    // }
     rerun_if_changed();
 
     // Link to libraries.
@@ -78,7 +78,7 @@ fn main() {
     }
 }
 
-/// Rerun the build script if any of the listed environment variables changes.
+// Rerun the build script if any of the listed environment variables changes.
 fn rerun_if_changed() {
     for var in ENVIRONMENT_VARIABLES {
         println!("cargo:rerun-if-env-changed={var}");

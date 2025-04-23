@@ -8,7 +8,7 @@ use std::{ffi::c_void, ptr, sync::Arc};
 
 use cudarc::driver::CudaDevice;
 
-use super::{api::ENCODE_API, result::EncodeError, session::Session};
+use super::{api::ENCODE_API, result::EncodeError, session::EncSession};
 use crate::sys::nvEncodeAPI::{
     GUID, NVENCAPI_VERSION, NV_ENC_BUFFER_FORMAT, NV_ENC_CONFIG, NV_ENC_CONFIG_VER,
     NV_ENC_DEVICE_TYPE, NV_ENC_INITIALIZE_PARAMS, NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS,
@@ -442,12 +442,12 @@ impl Encoder {
         self,
         buffer_format: NV_ENC_BUFFER_FORMAT,
         mut initialize_params: NV_ENC_INITIALIZE_PARAMS,
-    ) -> Result<Session, EncodeError> {
+    ) -> Result<EncSession, EncodeError> {
         let width = initialize_params.encodeWidth;
         let height = initialize_params.encodeHeight;
         unsafe { (ENCODE_API.initialize_encoder)(self.ptr, &mut initialize_params) }
             .result(&self)?;
-        Ok(Session {
+        Ok(EncSession {
             encoder: self,
             width,
             height,

@@ -4,22 +4,18 @@
 //! [`sys`](crate::sys) for the missing functionality.
 
 mod api;
-mod buffer;
-mod builders;
-mod encoder;
+// mod buffer;
+// mod builders;
+mod decoder;
+// mod encoder;
 mod result;
-mod session;
+// mod session;
 
-pub use api::{EncodeAPI, ENCODE_API};
-pub use buffer::{
-    Bitstream,
-    BitstreamLock,
-    Buffer,
-    BufferLock,
-    EncoderInput,
-    EncoderOutput,
-    RegisteredResource,
-};
-pub use encoder::Encoder;
-pub use result::{EncodeError, ErrorKind};
-pub use session::{CodecPictureParams, EncodePictureParams, Session};
+pub use api::{DecodeAPI, DECODE_API};
+// pub use buffer::{
+//     Bitstream, BitstreamLock, Buffer, BufferLock, EncoderInput, EncoderOutput, RegisteredResource,
+// };
+pub use decoder::Decoder;
+// pub use encoder::Encoder;
+// pub use result::{EncodeError, ErrorKind};
+// pub use session::{CodecPictureParams, EncSession, EncodePictureParams};

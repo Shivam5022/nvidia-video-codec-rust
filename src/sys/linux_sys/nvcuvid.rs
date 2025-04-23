@@ -61,6 +61,7 @@ pub struct _CUSEIMESSAGE {
     pub sei_message_size: ::core::ffi::c_uint,
 }
 #[repr(C)]
+#[derive(Clone, Debug)]
 pub struct CUVIDEOFORMAT {
     pub codec: cudaVideoCodec,
     pub frame_rate: CUVIDEOFORMAT__bindgen_ty_1,

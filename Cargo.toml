@@ -18,12 +18,15 @@ cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
 features = ["ci-check"]
 
 [dependencies]
-cudarc = "0.9.14"
+cudarc = { version = "0.16.1", features = ["std", "runtime", "driver", "nvrtc",  "cuda-version-from-build-system", "dynamic-linking"], default-features=false }
+
 lazy_static = "1.4.0"
+ffmpeg-next = {path = "../rust-ffmpeg"}
+
 
 [dev-dependencies]
 vulkano = "0.33.0"
 
 [features]
 default = []
-ci-check = ["cudarc/ci-check"]
+# ci-check = ["cudarc/ci-check"]

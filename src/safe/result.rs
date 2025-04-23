@@ -4,7 +4,7 @@
 
 use std::{error::Error, ffi::CStr, fmt};
 
-use super::{api::ENCODE_API, encoder::Encoder};
+// use super::{api::ENCODE_API, encoder::Encoder};
 use crate::sys::nvEncodeAPI::NVENCSTATUS;
 
 /// Wrapper enum around [`NVENCSTATUS`].
@@ -106,6 +106,35 @@ pub enum ErrorKind {
     /// call. When operating in asynchronous mode of encoding, client must
     /// also specify the completion event.
     NeedMoreOutput = 26,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DecodeError {
+    kind: ErrorKind,
+    string: Option<String>,
+}
+
+impl DecodeError {
+    /// Getter for the error kind.
+    #[must_use]
+    pub fn kind(&self) -> ErrorKind {
+        self.kind
+    }
+
+    /// Getter for the error string.
+    #[must_use]
+    pub fn string(&self) -> Option<&str> {
+        self.string.as_deref()
+    }
+}
+
+impl fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.string {
+            Some(s) => write!(f, "{:?}: {s}", self.kind),
+            None => write!(f, "{:?}", self.kind),
+        }
+    }
 }
 
 /// Wrapper struct around [`NVENCSTATUS`].
@@ -211,25 +240,25 @@ impl NVENCSTATUS {
     /// // Unfortunately, it's not always helpful.
     /// assert_eq!(error.string(), Some("EncodeAPI Internal Error."));
     /// ```
-    pub fn result(self, encoder: &Encoder) -> Result<(), EncodeError> {
-        self.result_without_string().map_err(|mut err| {
-            err.string = match err.kind {
-                // Avoid getting the string if it is not needed.
-                ErrorKind::LockBusy
-                | ErrorKind::EncoderBusy
-                | ErrorKind::NeedMoreInput
-                | ErrorKind::OutOfMemory => None,
-                // Otherwise allocate an owned `String` with the error.
-                _ => Some(
-                    unsafe { CStr::from_ptr((ENCODE_API.get_last_error_string)(encoder.ptr)) }
-                        .to_string_lossy()
-                        .to_string(),
-                ),
-            }
-            .and_then(|s| if s.is_empty() { None } else { Some(s) });
-            err
-        })
-    }
+    // pub fn result(self, encoder: &Encoder) -> Result<(), EncodeError> {
+    //     self.result_without_string().map_err(|mut err| {
+    //         err.string = match err.kind {
+    //             // Avoid getting the string if it is not needed.
+    //             ErrorKind::LockBusy
+    //             | ErrorKind::EncoderBusy
+    //             | ErrorKind::NeedMoreInput
+    //             | ErrorKind::OutOfMemory => None,
+    //             // Otherwise allocate an owned `String` with the error.
+    //             _ => Some(
+    //                 unsafe { CStr::from_ptr((ENCODE_API.get_last_error_string)(encoder.ptr)) }
+    //                     .to_string_lossy()
+    //                     .to_string(),
+    //             ),
+    //         }
+    //         .and_then(|s| if s.is_empty() { None } else { Some(s) });
+    //         err
+    //     })
+    // }
 
     /// Convert an [`NVENCSTATUS`] to a [`Result`] without
     /// using an [`Encoder`].

@@ -4,22 +4,13 @@ use std::{ffi::c_void, ptr};
 
 use cudarc::driver::{DevicePtr, MappedBuffer};
 
-use super::{api::ENCODE_API, encoder::Encoder, result::EncodeError, session::Session};
+use super::{api::ENCODE_API, encoder::Encoder, result::EncodeError, session::EncSession};
 use crate::sys::nvEncodeAPI::{
-    NV_ENC_BUFFER_FORMAT,
-    NV_ENC_CREATE_BITSTREAM_BUFFER,
-    NV_ENC_CREATE_BITSTREAM_BUFFER_VER,
-    NV_ENC_CREATE_INPUT_BUFFER,
-    NV_ENC_CREATE_INPUT_BUFFER_VER,
-    NV_ENC_INPUT_RESOURCE_TYPE,
-    NV_ENC_LOCK_BITSTREAM,
-    NV_ENC_LOCK_BITSTREAM_VER,
-    NV_ENC_LOCK_INPUT_BUFFER,
-    NV_ENC_LOCK_INPUT_BUFFER_VER,
-    NV_ENC_MAP_INPUT_RESOURCE,
-    NV_ENC_MAP_INPUT_RESOURCE_VER,
-    NV_ENC_PIC_TYPE,
-    NV_ENC_REGISTER_RESOURCE,
+    NV_ENC_BUFFER_FORMAT, NV_ENC_CREATE_BITSTREAM_BUFFER, NV_ENC_CREATE_BITSTREAM_BUFFER_VER,
+    NV_ENC_CREATE_INPUT_BUFFER, NV_ENC_CREATE_INPUT_BUFFER_VER, NV_ENC_INPUT_RESOURCE_TYPE,
+    NV_ENC_LOCK_BITSTREAM, NV_ENC_LOCK_BITSTREAM_VER, NV_ENC_LOCK_INPUT_BUFFER,
+    NV_ENC_LOCK_INPUT_BUFFER_VER, NV_ENC_MAP_INPUT_RESOURCE, NV_ENC_MAP_INPUT_RESOURCE_VER,
+    NV_ENC_PIC_TYPE, NV_ENC_REGISTER_RESOURCE,
 };
 
 /// If a type implements this trait it means it is a valid input buffer
@@ -40,7 +31,7 @@ pub trait EncoderOutput {
 }
 
 /// Functions for creating input and output buffers.
-impl Session {
+impl EncSession {
     /// Create a [`Buffer`].
     ///
     /// See [NVIDIA docs](https://docs.nvidia.com/video-technologies/video-codec-sdk/12.0/nvenc-video-encoder-api-prog-guide/index.html#creating-resources-required-to-hold-inputoutput-data).

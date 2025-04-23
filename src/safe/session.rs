@@ -10,22 +10,12 @@ use std::fmt::Debug;
 use super::{api::ENCODE_API, encoder::Encoder, result::EncodeError};
 use crate::{
     sys::nvEncodeAPI::{
-        GUID,
-        NV_ENC_BUFFER_FORMAT,
-        NV_ENC_CODEC_AV1_GUID,
-        NV_ENC_CODEC_H264_GUID,
-        NV_ENC_CODEC_HEVC_GUID,
-        NV_ENC_CODEC_PIC_PARAMS,
-        NV_ENC_PIC_PARAMS,
-        NV_ENC_PIC_PARAMS_AV1,
-        NV_ENC_PIC_PARAMS_H264,
-        NV_ENC_PIC_PARAMS_HEVC,
-        NV_ENC_PIC_PARAMS_VER,
-        NV_ENC_PIC_STRUCT,
+        GUID, NV_ENC_BUFFER_FORMAT, NV_ENC_CODEC_AV1_GUID, NV_ENC_CODEC_H264_GUID,
+        NV_ENC_CODEC_HEVC_GUID, NV_ENC_CODEC_PIC_PARAMS, NV_ENC_PIC_PARAMS, NV_ENC_PIC_PARAMS_AV1,
+        NV_ENC_PIC_PARAMS_H264, NV_ENC_PIC_PARAMS_HEVC, NV_ENC_PIC_PARAMS_VER, NV_ENC_PIC_STRUCT,
         NV_ENC_PIC_TYPE,
     },
-    EncoderInput,
-    EncoderOutput,
+    EncoderInput, EncoderOutput,
 };
 
 /// An encoding session to create input/output buffers and encode frames.
@@ -34,7 +24,7 @@ use crate::{
 /// encode frames using the session. On drop, the session will automatically
 /// send an empty EOS frame to flush the encoder.
 #[derive(Debug)]
-pub struct Session {
+pub struct EncSession {
     pub(crate) encoder: Encoder,
     pub(crate) width: u32,
     pub(crate) height: u32,
@@ -42,7 +32,7 @@ pub struct Session {
     pub(crate) encode_guid: GUID,
 }
 
-impl Session {
+impl EncSession {
     /// Get the encoder used for this session.
     ///
     /// This might be useful if you want to use some of
@@ -222,7 +212,7 @@ impl Session {
 }
 
 /// Send an EOS notifications on drop to flush the encoder.
-impl Drop for Session {
+impl Drop for EncSession {
     fn drop(&mut self) {
         if !std::thread::panicking() {
             self.end_of_stream()
