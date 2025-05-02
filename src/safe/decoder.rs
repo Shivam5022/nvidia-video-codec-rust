@@ -1,4 +1,6 @@
+use bincode::{Decode, Encode};
 use core::panic;
+
 use std::{
     alloc::{alloc, dealloc, Layout},
     collections::VecDeque,
@@ -67,7 +69,7 @@ pub struct Dim {
 }
 
 ///
-#[derive(Debug)]
+#[derive(Debug, Encode, Decode)]
 pub struct Frame {
     ptr: CUdeviceptr,
     size: usize,
