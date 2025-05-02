@@ -1,15 +1,20 @@
 use cudarc::driver::CudaContext;
 use ffmpeg::codec::Id;
-use ffmpeg::color::Primaries;
+use nvidia_video_codec_sdk::CpuFrame;
 use nvidia_video_codec_sdk::Decoder;
+use nvidia_video_codec_sdk::Frame;
 extern crate ffmpeg_next as ffmpeg;
 use std::collections::VecDeque;
+use std::fs::File;
+use std::io::Write;
+use std::path::PathBuf;
 use std::ptr;
+use std::str::FromStr;
 
 use ffmpeg::bsfilter::BSFContext;
 use ffmpeg::{format, Packet};
 
-fn demux(vid_path: &'static str) -> (VecDeque<Packet>, Id) {
+fn demux(vid_path: PathBuf) -> (VecDeque<Packet>, Id) {
     let ictx = format::input(&vid_path).unwrap();
     let stream = ictx.streams().best(ffmpeg::media::Type::Video).unwrap();
     let stream_id = stream.id();
@@ -106,43 +111,65 @@ fn extract_packets(mut ictx: format::context::Input, stream_id: i32) -> VecDeque
     }
     packets
 }
+pub struct FrameIter {
+    num_decoded_frames: usize,
+    decoder: Decoder,
+    packets: VecDeque<Packet>,
+}
 
-fn main() {
-    let vid_path = "/home/satyam/dev/nv_encdec/input.mp4";
-    // Create a new CudaDevice to interact with cuda.
-    // let cuda_device = CudaDevice::new(0).expect("Cuda should be installed correctly.");
-    let ctx = CudaContext::new(0).unwrap();
-    let stream = ctx.new_stream().unwrap();
-    let (mut packets, codec_id) = demux(vid_path);
-    let codec_id = ffmpeg_id_to_nv_id(codec_id);
+impl TryFrom<PathBuf> for FrameIter {
+    type Error = String;
 
-    let mut decoder = Decoder::initialize_with_cuda(ctx.clone(), stream.clone(), codec_id)
-        .expect("NVIDIA Video Codec SDK should be installed correctly.");
+    fn try_from(file_path: PathBuf) -> Result<Self, Self::Error> {
+        // let vid_path = "/home/satyam/dev/input.mp4";
+        let ctx = CudaContext::new(0).unwrap();
+        let stream = ctx.new_stream().unwrap();
+        let (packets, codec_id) = demux(file_path);
+        let codec_id = ffmpeg_id_to_nv_id(codec_id);
 
-    let mut tot_frames = 0;
-    loop {
-        if packets.len() == 0 {
-            break;
-        }
-        let mut packet = packets.pop_front().unwrap();
-        let size = packet.size();
-        let data = packet.data_mut().unwrap();
-        let frame_returned = decoder.decode(data.as_mut_ptr(), size as u64);
+        let decoder = Decoder::initialize_with_cuda(ctx.clone(), stream.clone(), codec_id)
+            .expect("NVIDIA Video Codec SDK should be installed correctly.");
+        Ok(Self {
+            num_decoded_frames: 0,
+            decoder,
+            packets,
+        })
+    }
+}
 
-        if frame_returned == 0 {
-            if packets.len() == 0 {
-                break;
+impl Iterator for FrameIter {
+    type Item = Frame;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.num_decoded_frames == 0 {
+                if self.packets.len() == 0 {
+                    return None;
+                }
+                let mut packet = self.packets.pop_front().unwrap();
+                let size = packet.size();
+                let data = packet.data_mut().unwrap();
+                self.num_decoded_frames = self.decoder.decode(data.as_mut_ptr(), size as u64);
             }
-            continue;
-        }
-        for _ in 0..frame_returned {
-            let p_frame = decoder.get_frame();
-            println!("{:?}", p_frame);
-            tot_frames += 1;
+
+            if self.num_decoded_frames != 0 {
+                let frame = self.decoder.get_frame();
+                self.num_decoded_frames -= 1;
+                return frame;
+            }
         }
     }
+}
 
-    println!("Total frames returned: {}", tot_frames);
+fn main() {
+    let mut frame_iter =
+        FrameIter::try_from(PathBuf::from_str("/home/satyam/dev/input.mp4").unwrap()).unwrap();
+    let mut out_file = File::create("output_rust.bin").unwrap();
+    while let Some(frame) = frame_iter.next() {
+        let cpu_frame = CpuFrame::from(frame);
+        let slice = cpu_frame.to_slice();
+        out_file.write(slice).unwrap();
+    }
 }
 
 fn ffmpeg_id_to_nv_id(codec_id: Id) -> nvidia_video_codec_sdk::sys::cuviddec::cudaVideoCodec {

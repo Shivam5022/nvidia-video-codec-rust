@@ -1,19 +1,24 @@
 use core::panic;
 use std::{
+    alloc::{alloc, dealloc, Layout},
     collections::VecDeque,
     ffi::{c_uchar, c_void},
-    mem::{self, MaybeUninit},
+    mem::MaybeUninit,
     ptr,
     sync::{Arc, Mutex},
-    thread::sleep,
-    time::Duration,
 };
 
-use cudarc::driver::{
-    sys::{cuMemAlloc_v2, cuMemcpy2DAsync_v2, CUdeviceptr, CUmemorytype, CUresult, CUDA_MEMCPY2D},
-    CudaContext,
-    CudaStream,
-    // CudaDevice,
+use cudarc::{
+    driver::{
+        sys::{
+            cuMemAlloc_v2, cuMemcpy2DAsync_v2, cuMemcpyDtoH_v2, CUdeviceptr, CUmemorytype,
+            CUresult, CUDA_MEMCPY2D,
+        },
+        CudaContext,
+        CudaStream,
+        // CudaDevice,
+    },
+    runtime::sys::cudaFree,
 };
 
 use crate::sys::{
@@ -61,9 +66,68 @@ pub struct Dim {
     h: i32,
 }
 
+///
+#[derive(Debug)]
+pub struct Frame {
+    ptr: CUdeviceptr,
+    size: usize,
+}
+
+impl Drop for Frame {
+    fn drop(&mut self) {
+        unsafe {
+            cudaFree(self.ptr as *mut c_void);
+        }
+    }
+}
+
+///
+#[derive(Debug)]
+pub struct CpuFrame {
+    ptr: *mut c_void,
+    size: usize,
+    layout: Layout,
+}
+
+impl From<Frame> for CpuFrame {
+    fn from(gpu_frame: Frame) -> Self {
+        let layout = Layout::from_size_align(gpu_frame.size, 8).expect("Invalid layout");
+        let ptr = unsafe { alloc(layout) };
+
+        if ptr.is_null() {
+            panic!("Allocation failed");
+        }
+
+        let ptr = ptr as *mut c_void;
+
+        unsafe {
+            cuMemcpyDtoH_v2(ptr, gpu_frame.ptr, gpu_frame.size);
+        }
+        CpuFrame {
+            ptr,
+            layout,
+            size: gpu_frame.size,
+        }
+    }
+}
+
+impl Drop for CpuFrame {
+    fn drop(&mut self) {
+        unsafe {
+            dealloc(self.ptr as *mut u8, self.layout);
+        }
+    }
+}
+
+impl CpuFrame {
+    pub fn to_slice(self) -> &'static [u8] {
+        unsafe { std::slice::from_raw_parts(self.ptr as *const u8, self.size) }
+    }
+}
+
 const MAX_FRM_CNT: usize = 32;
 pub struct DecodeContext {
-    frame_queue: Mutex<VecDeque<*mut u8>>,
+    frame_queue: Mutex<VecDeque<Frame>>,
     // cuda_device: Arc<CudaDevice>,
     ctx: Arc<CudaContext>,
     cuda_stream: Arc<CudaStream>,
@@ -135,7 +199,6 @@ impl DecodeContext {
                 t: 0,
                 b: 0,
             },
-
             surface_height: 0,
             surface_width: 0,
             decoder: ptr::null_mut(),
@@ -177,7 +240,7 @@ unsafe extern "C" fn handle_video_seq(
     arg1: *mut ::core::ffi::c_void,
     p_video_format: *mut CUVIDEOFORMAT,
 ) -> ::core::ffi::c_int {
-    println!("Inside the callback: [Handle Video Sequence]");
+    // println!("Inside the callback: [Handle Video Sequence]");
     // println!("Fields of video format: {:?}", *p_video_format);
     let context = arg1 as *mut DecodeContext;
     let n_decode_surface = (*p_video_format).min_num_decode_surfaces as i32;
@@ -289,8 +352,6 @@ unsafe extern "C" fn handle_video_seq(
     let mut video_decode_create_info =
         create_viddec_info(p_video_format, &mut (*context), n_decode_surface);
 
-    println!("Metadata: {:?}", video_decode_create_info);
-
     (*context).chroma_height = ((*context).luma_height as f32
         * get_chroma_height_factor((*context).output_format))
     .ceil() as u32;
@@ -304,24 +365,12 @@ unsafe extern "C" fn handle_video_seq(
     (*context).display_rect.l = video_decode_create_info.display_area.left as i32;
     (*context).display_rect.r = video_decode_create_info.display_area.right as i32;
 
-    println!("Start");
-    println!(
-        "Size of struct is : {}",
-        size_of::<crate::sys::cuviddec::CUVIDDECODECREATEINFO>()
-    );
-    let bytes = unsafe {
-        mem::transmute::<
-            &crate::sys::cuviddec::CUVIDDECODECREATEINFO,
-            &[u8; mem::size_of::<crate::sys::cuviddec::CUVIDDECODECREATEINFO>()],
-        >(&video_decode_create_info)
-    };
-    println!("Bytes: {:?}", bytes);
     let res = unsafe {
         (DECODE_API.create_decoder)(&mut (*context).decoder, &mut video_decode_create_info)
     };
-    println!("{:?}", res);
-    println!("{}", (*context).decoder == ptr::null_mut());
-    println!("End");
+    if res != CUresult::CUDA_SUCCESS {
+        panic!("Something went wrong during decoder init");
+    }
 
     n_decode_surface
 }
@@ -432,7 +481,7 @@ unsafe extern "C" fn handle_picture_decode(
     arg1: *mut ::core::ffi::c_void,
     pic_params: *mut CUVIDPICPARAMS,
 ) -> ::core::ffi::c_int {
-    println!("Inside the callback: [Handle Picture Decode]");
+    // println!("Inside the callback: [Handle Picture Decode]");
     let context_box = arg1 as *mut DecodeContext;
 
     if (*context_box).decoder == ptr::null_mut() {
@@ -453,7 +502,6 @@ unsafe extern "C" fn handle_picture_display(
     arg1: *mut ::core::ffi::c_void,
     p_disp_info: *mut CUVIDPARSERDISPINFO,
 ) -> ::core::ffi::c_int {
-    // panic!("ksadfklsdklf");
     let context = arg1 as *mut DecodeContext;
     let mut video_processing_parameters = CUVIDPROCPARAMS {
         progressive_frame: (*p_disp_info).progressive_frame,
@@ -552,11 +600,10 @@ unsafe extern "C" fn handle_picture_display(
     }
     unsafe { (DECODE_API.unmap_video_frame)((*context).decoder, dp_src_frame) };
 
-    (*context)
-        .frame_queue
-        .lock()
-        .unwrap()
-        .push_back(frame as *mut u8);
+    (*context).frame_queue.lock().unwrap().push_back(Frame {
+        ptr: frame,
+        size: frame_size as usize,
+    });
 
     1
 }
@@ -573,17 +620,6 @@ unsafe extern "C" fn handle_operating_point(
             {
                 context_box.operating_pts = 0;
             }
-            println!(
-                "AV1 SVC clip: operating point count {}  ",
-                ((*p_op_info).__bindgen_anon_1.av1.operating_points_cnt)
-            );
-            println!(
-                "Selected operating point: {}, IDC {} bOutputAllLayers {}\n",
-                context_box.operating_pts,
-                (*p_op_info).__bindgen_anon_1.av1.operating_points_idc
-                    [context_box.operating_pts as usize],
-                context_box.display_all_layers
-            );
             return context_box.operating_pts | ((context_box.display_all_layers as i32) << 10);
         }
     }
@@ -655,7 +691,7 @@ impl Decoder {
     }
 
     ///
-    pub fn get_frame(&mut self) -> Option<*mut u8> {
+    pub fn get_frame(&mut self) -> Option<Frame> {
         unsafe {
             (*self.get_decoder_context())
                 .frame_queue
