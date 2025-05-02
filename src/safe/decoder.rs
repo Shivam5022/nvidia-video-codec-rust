@@ -69,7 +69,7 @@ pub struct Dim {
 }
 
 ///
-#[derive(Debug, Encode, Decode)]
+#[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub struct Frame {
     ptr: CUdeviceptr,
     size: usize,
