@@ -1,8 +1,12 @@
+extern crate cudarc;
+extern crate nvidia_video_codec_sdk;
+
 use cudarc::driver::CudaContext;
 use ffmpeg::codec::Id;
 use nvidia_video_codec_sdk::CpuFrame;
 use nvidia_video_codec_sdk::Decoder;
 use nvidia_video_codec_sdk::Frame;
+use std::convert::TryFrom;
 extern crate ffmpeg_next as ffmpeg;
 use std::collections::VecDeque;
 use std::fs::File;

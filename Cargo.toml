@@ -21,11 +21,12 @@ features = ["ci-check"]
 cudarc = { version = "0.16.1", features = ["std", "runtime", "driver", "nvrtc",  "cuda-version-from-build-system", "dynamic-linking"], default-features=false }
 
 lazy_static = "1.4.0"
-ffmpeg-next = {path = "../rust-ffmpeg"}
+# ffmpeg-next = { git = "https://github.com/Shivam5022/rust-ffmpeg" }
 
 
 [dev-dependencies]
 vulkano = "0.33.0"
+
 
 [features]
 default = []
