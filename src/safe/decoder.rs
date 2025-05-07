@@ -43,13 +43,21 @@ type Ctx = Arc<CudaContext>;
 type Stream = Arc<CudaStream>;
 ///
 #[derive(Debug)]
+struct ParserPtr(*mut c_void);
+unsafe impl Send for ParserPtr {}
+
+#[derive(Debug)]
+struct DecCtxPtr(*mut c_void);
+unsafe impl Send for DecCtxPtr {}
+
+#[derive(Debug)]
 pub struct Decoder {
-    parser: *mut c_void,
+    parser: ParserPtr,
     // Used to make sure that CudaDevice stays alive while the Decoder does
     _ctx: Ctx,
     _stream: Stream,
     // Context for the callbacks
-    decoder_context: *mut c_void,
+    decoder_context: DecCtxPtr,
 }
 
 impl Drop for Decoder {
@@ -245,13 +253,21 @@ unsafe extern "C" fn handle_video_seq(
     // println!("Inside the callback: [Handle Video Sequence]");
     // println!("Fields of video format: {:?}", *p_video_format);
     let context = arg1 as *mut DecodeContext;
+    unsafe {
+        let cu_ctx = (*context).ctx.clone(); // Replace with your actual field name
+        let status = cudarc::driver::sys::cuCtxPushCurrent_v2((*cu_ctx).cu_ctx());
+        if status != CUresult::CUDA_SUCCESS {
+            panic!("Failed to push CUDA context: {:?}", status);
+        }
+    }
     let n_decode_surface = (*p_video_format).min_num_decode_surfaces as i32;
     let mut decode_caps: CUVIDDECODECAPS = unsafe { std::mem::zeroed() };
     decode_caps.eCodecType = (*p_video_format).codec;
     decode_caps.eChromaFormat = (*p_video_format).chroma_format;
     decode_caps.nBitDepthMinus8 = (*p_video_format).bit_depth_luma_minus8 as u32;
 
-    unsafe { (DECODE_API.get_decode_caps)(&mut decode_caps) };
+    let res = unsafe { (DECODE_API.get_decode_caps)(&mut decode_caps) };
+    println!("{:?}", res);
 
     if decode_caps.bIsSupported == 0 {
         panic!("Codec not supported on this GPU")
@@ -660,15 +676,15 @@ impl Decoder {
         unsafe { (DECODE_API.create_video_parser)(&mut parser, &mut parser_parameters) };
 
         Ok(Decoder {
-            parser,
-            decoder_context: context,
+            parser: ParserPtr(parser),
+            decoder_context: DecCtxPtr(context),
             _ctx: cuda_ctx,
             _stream: cuda_stream,
         })
     }
 
     fn get_decoder_context(&self) -> *mut DecodeContext {
-        self.decoder_context as *mut DecodeContext
+        (self.decoder_context.0) as *mut DecodeContext
     }
 
     ///
@@ -679,7 +695,7 @@ impl Decoder {
             payload: input,
             timestamp: 0,
         };
-        let res = unsafe { (DECODE_API.parse_video_data)(self.parser, &mut packet) };
+        let res = unsafe { (DECODE_API.parse_video_data)(self.parser.0, &mut packet) };
         // println!("res {:?}", res);
 
         // The callback `handle_picture_decode` should populate this queue with decoded frames
