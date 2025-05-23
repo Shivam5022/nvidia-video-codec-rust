@@ -64,6 +64,7 @@ impl Drop for Decoder {
     fn drop(&mut self) {}
 }
 
+#[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub struct Rect {
     l: i32,
     t: i32,
@@ -71,30 +72,32 @@ pub struct Rect {
     b: i32,
 }
 
+#[derive(Encode, Decode, PartialEq, Debug, Clone, Copy)]
+///
 pub struct Dim {
-    w: i32,
-    h: i32,
+    pub w: i32,
+    pub h: i32,
 }
 
 ///
 #[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub struct Frame {
-    ptr: CUdeviceptr,
-    size: usize,
+    pub ptr: CUdeviceptr,
+    pub size: usize,
 }
 
 impl Drop for Frame {
     fn drop(&mut self) {
         unsafe {
-            cudaFree(self.ptr as *mut c_void);
+            // cudaFree(self.ptr as *mut c_void);
         }
     }
 }
 
 ///
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CpuFrame {
-    ptr: *mut c_void,
+    pub ptr: *mut c_void,
     size: usize,
     layout: Layout,
 }
@@ -176,6 +179,7 @@ impl DecodeContext {
         ctx: Arc<CudaContext>,
         stream: Arc<CudaStream>,
         codec_type: cudaVideoCodec_enum,
+        resize_info: Dim,
     ) -> Self {
         let mut ctx_lock = ptr::null_mut();
         unsafe { (DECODE_API.ctx_lock_create)(&mut ctx_lock, ctx.cu_ctx()) };
@@ -198,7 +202,8 @@ impl DecodeContext {
                 t: 0,
                 b: 0,
             },
-            resize_dim: Dim { w: 0, h: 0 },
+            resize_dim: resize_info,
+            // resize_dim: Dim { w: 0, h: 0 },
             width: 0,
             luma_height: 0,
             chroma_height: 0,
@@ -578,7 +583,8 @@ unsafe extern "C" fn handle_picture_display(
 
     unsafe { cuMemAlloc_v2(&mut frame, frame_size as usize) };
 
-    // let latest_frame: *mut u8 = (*context_box).frame_queue.lock().unwrap().front();
+    // println!("Decoder getWidth = {}", temp_width);
+    // println!("Decoder getHeight = {}", (*context).luma_height);
 
     // now copy the luma and chroma planes
     let mut m = CUDA_MEMCPY2D {
@@ -651,11 +657,13 @@ impl Decoder {
         cuda_ctx: Arc<CudaContext>,
         cuda_stream: Arc<CudaStream>,
         codec_type: cudaVideoCodec_enum,
+        resize_info: Dim,
     ) -> Result<Self, DecodeError> {
         let context = Box::new(DecodeContext::new(
             cuda_ctx.clone(),
             cuda_stream.clone(),
             codec_type,
+            resize_info,
         ));
         let context: *mut c_void = Box::into_raw(context) as *mut c_void;
         // cuda_device.cu_primary_ctx()

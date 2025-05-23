@@ -17,6 +17,7 @@ pub use api::{DecodeAPI, DECODE_API};
 // };
 pub use decoder::CpuFrame;
 pub use decoder::Decoder;
+pub use decoder::Dim;
 pub use decoder::Frame;
 // pub use encoder::Encoder;
 // pub use result::{EncodeError, ErrorKind};
