@@ -5,6 +5,7 @@ use std::{
     alloc::{alloc, dealloc, Layout},
     collections::VecDeque,
     ffi::{c_uchar, c_void},
+    io::Write,
     mem::MaybeUninit,
     ptr,
     sync::{Arc, Mutex},
@@ -80,17 +81,89 @@ pub struct Dim {
 }
 
 ///
-#[derive(Encode, Decode, PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug)]
 pub struct Frame {
     pub ptr: CUdeviceptr,
-    pub size: usize,
+    size: usize,
+    drop: std::cell::Cell<bool>,
+}
+
+impl Clone for Frame {
+    fn clone(&self) -> Self {
+        Self {
+            ptr: self.ptr,
+            size: self.size,
+            drop: self.drop.clone(),
+        }
+    }
+}
+
+impl Frame {
+    ///
+    pub fn new(ptr: CUdeviceptr, size: usize) -> Frame {
+        // println!("Allocating   {}", ptr);
+        Self {
+            ptr,
+            size,
+            drop: std::cell::Cell::new(true),
+        }
+    }
+
+    ///
+    pub fn ptr(&self) -> CUdeviceptr {
+        self.ptr
+    }
 }
 
 impl Drop for Frame {
     fn drop(&mut self) {
-        unsafe {
-            // cudaFree(self.ptr as *mut c_void);
+        if self.drop.get() {
+            // println!("Freeing      {}", self.ptr);
+            std::io::stdout().flush().unwrap();
+            unsafe {
+                cudaFree(self.ptr as *mut c_void);
+            }
+        } else {
+            // println!("Skip freeing {}", self.ptr);
+            std::io::stdout().flush().unwrap();
         }
+    }
+}
+
+impl bincode::Encode for Frame {
+    fn encode<E: ::bincode::enc::Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> core::result::Result<(), ::bincode::error::EncodeError> {
+        ::bincode::Encode::encode(&self.ptr, encoder)?;
+        ::bincode::Encode::encode(&self.size, encoder)?;
+        self.drop.set(false);
+        // println!("Setting drop to false {}", self.ptr);
+        std::io::stdout().flush().unwrap();
+        core::result::Result::Ok(())
+    }
+}
+
+impl<Context> ::bincode::Decode<Context> for Frame {
+    fn decode<D: ::bincode::de::Decoder<Context = Context>>(
+        decoder: &mut D,
+    ) -> core::result::Result<Self, ::bincode::error::DecodeError> {
+        core::result::Result::Ok(Self {
+            ptr: ::bincode::Decode::decode(decoder)?,
+            size: ::bincode::Decode::decode(decoder)?,
+            drop: std::cell::Cell::new(true),
+        })
+    }
+}
+impl<'de, Context> ::bincode::BorrowDecode<'de, Context> for Frame {
+    fn borrow_decode<D: ::bincode::de::BorrowDecoder<'de, Context = Context>>(
+        decoder: &mut D,
+    ) -> core::result::Result<Self, ::bincode::error::DecodeError> {
+        core::result::Result::Ok(Self {
+            ptr: ::bincode::BorrowDecode::<'_, Context>::borrow_decode(decoder)?,
+            size: ::bincode::BorrowDecode::<'_, Context>::borrow_decode(decoder)?,
+            drop: std::cell::Cell::new(true),
+        })
     }
 }
 
@@ -255,8 +328,8 @@ unsafe extern "C" fn handle_video_seq(
     arg1: *mut ::core::ffi::c_void,
     p_video_format: *mut CUVIDEOFORMAT,
 ) -> ::core::ffi::c_int {
-    // println!("Inside the callback: [Handle Video Sequence]");
-    // println!("Fields of video format: {:?}", *p_video_format);
+    println!("Inside the callback: [Handle Video Sequence]");
+    println!("Fields of video format: {:?}", *p_video_format);
     let context = arg1 as *mut DecodeContext;
     unsafe {
         let cu_ctx = (*context).ctx.clone(); // Replace with your actual field name
@@ -582,6 +655,7 @@ unsafe extern "C" fn handle_picture_display(
         * (*context).n_bpp as i32;
 
     unsafe { cuMemAlloc_v2(&mut frame, frame_size as usize) };
+    // println!("Allocated {frame}");
 
     // println!("Decoder getWidth = {}", temp_width);
     // println!("Decoder getHeight = {}", (*context).luma_height);
@@ -624,10 +698,11 @@ unsafe extern "C" fn handle_picture_display(
     }
     unsafe { (DECODE_API.unmap_video_frame)((*context).decoder, dp_src_frame) };
 
-    (*context).frame_queue.lock().unwrap().push_back(Frame {
-        ptr: frame,
-        size: frame_size as usize,
-    });
+    (*context)
+        .frame_queue
+        .lock()
+        .unwrap()
+        .push_back(Frame::new(frame, frame_size as usize));
 
     1
 }
@@ -704,7 +779,6 @@ impl Decoder {
             timestamp: 0,
         };
         let res = unsafe { (DECODE_API.parse_video_data)(self.parser.0, &mut packet) };
-        // println!("res {:?}", res);
 
         // The callback `handle_picture_decode` should populate this queue with decoded frames
         unsafe {
