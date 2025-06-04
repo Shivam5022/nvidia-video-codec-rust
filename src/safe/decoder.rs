@@ -84,7 +84,7 @@ pub struct Dim {
 #[derive(PartialEq, Debug)]
 pub struct Frame {
     pub ptr: CUdeviceptr,
-    size: usize,
+    pub size: usize,
     drop: std::cell::Cell<bool>,
 }
 
