@@ -18,7 +18,7 @@ pub use api::{DecodeAPI, DECODE_API};
 pub use decoder::CpuFrame;
 pub use decoder::Decoder;
 pub use decoder::Dim;
-pub use decoder::Frame;
+pub use decoder::GPUFrame;
 // pub use encoder::Encoder;
 // pub use result::{EncodeError, ErrorKind};
 // pub use session::{CodecPictureParams, EncSession, EncodePictureParams};

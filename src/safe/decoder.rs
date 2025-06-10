@@ -2,26 +2,16 @@ use bincode::{Decode, Encode};
 use core::panic;
 
 use std::{
-    alloc::{alloc, dealloc, Layout},
     collections::VecDeque,
     ffi::{c_uchar, c_void},
-    io::Write,
     mem::MaybeUninit,
     ptr,
     sync::{Arc, Mutex},
 };
 
-use cudarc::{
-    driver::{
-        sys::{
-            cuMemAlloc_v2, cuMemcpy2DAsync_v2, cuMemcpyDtoH_v2, CUdeviceptr, CUmemorytype,
-            CUresult, CUDA_MEMCPY2D,
-        },
-        CudaContext,
-        CudaStream,
-        // CudaDevice,
-    },
-    runtime::sys::cudaFree,
+use cudarc::driver::{
+    sys::{cuMemAlloc_v2, cuMemcpy2DAsync_v2, CUdeviceptr, CUmemorytype, CUresult, CUDA_MEMCPY2D},
+    CudaContext, CudaSlice, CudaStream, DevicePtr,
 };
 
 use crate::sys::{
@@ -51,6 +41,7 @@ unsafe impl Send for ParserPtr {}
 struct DecCtxPtr(*mut c_void);
 unsafe impl Send for DecCtxPtr {}
 
+///
 #[derive(Debug)]
 pub struct Decoder {
     parser: ParserPtr,
@@ -76,144 +67,80 @@ pub struct Rect {
 #[derive(Encode, Decode, PartialEq, Debug, Clone, Copy)]
 ///
 pub struct Dim {
+    ///
     pub w: i32,
+    ///
     pub h: i32,
 }
 
 ///
-#[derive(PartialEq, Debug)]
-pub struct Frame {
-    pub ptr: CUdeviceptr,
-    pub size: usize,
-    drop: std::cell::Cell<bool>,
+#[derive(Debug)]
+pub struct GPUFrame {
+    ///
+    pub ptr: Arc<CudaSlice<f32>>,
 }
 
-impl Clone for Frame {
+impl PartialEq for GPUFrame {
+    fn eq(&self, other: &Self) -> bool {
+        other.ptr.device_ptr(other.ptr.stream()).0 == self.ptr.device_ptr(self.ptr.stream()).0
+            && self.ptr.len() == other.ptr.len()
+    }
+}
+
+impl Clone for GPUFrame {
     fn clone(&self) -> Self {
         Self {
-            ptr: self.ptr,
-            size: self.size,
-            drop: self.drop.clone(),
+            ptr: self.ptr.clone(),
         }
     }
 }
 
-impl Frame {
+impl GPUFrame {
     ///
-    pub fn new(ptr: CUdeviceptr, size: usize) -> Frame {
-        // println!("Allocating   {}", ptr);
-        Self {
-            ptr,
-            size,
-            drop: std::cell::Cell::new(true),
+    pub fn new(ptr: CudaSlice<f32>) -> GPUFrame {
+        Self { ptr: Arc::new(ptr) }
+    }
+}
+
+impl From<CpuFrame> for GPUFrame {
+    fn from(cpu_frame: CpuFrame) -> Self {
+        let ctx = CudaContext::new(0).unwrap();
+        let stream = ctx.default_stream();
+        unsafe {
+            let mut dst: CudaSlice<f32> = stream.alloc::<f32>(cpu_frame.vec.len()).unwrap();
+            stream.memcpy_htod(&(*cpu_frame.vec), &mut dst).unwrap();
+            GPUFrame { ptr: Arc::new(dst) }
         }
-    }
-
-    ///
-    pub fn ptr(&self) -> CUdeviceptr {
-        self.ptr
-    }
-}
-
-impl Drop for Frame {
-    fn drop(&mut self) {
-        if self.drop.get() {
-            // println!("Freeing      {}", self.ptr);
-            std::io::stdout().flush().unwrap();
-            unsafe {
-                cudaFree(self.ptr as *mut c_void);
-            }
-        } else {
-            // println!("Skip freeing {}", self.ptr);
-            std::io::stdout().flush().unwrap();
-        }
-    }
-}
-
-impl bincode::Encode for Frame {
-    fn encode<E: ::bincode::enc::Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> core::result::Result<(), ::bincode::error::EncodeError> {
-        ::bincode::Encode::encode(&self.ptr, encoder)?;
-        ::bincode::Encode::encode(&self.size, encoder)?;
-        self.drop.set(false);
-        // println!("Setting drop to false {}", self.ptr);
-        std::io::stdout().flush().unwrap();
-        core::result::Result::Ok(())
-    }
-}
-
-impl<Context> ::bincode::Decode<Context> for Frame {
-    fn decode<D: ::bincode::de::Decoder<Context = Context>>(
-        decoder: &mut D,
-    ) -> core::result::Result<Self, ::bincode::error::DecodeError> {
-        core::result::Result::Ok(Self {
-            ptr: ::bincode::Decode::decode(decoder)?,
-            size: ::bincode::Decode::decode(decoder)?,
-            drop: std::cell::Cell::new(true),
-        })
-    }
-}
-impl<'de, Context> ::bincode::BorrowDecode<'de, Context> for Frame {
-    fn borrow_decode<D: ::bincode::de::BorrowDecoder<'de, Context = Context>>(
-        decoder: &mut D,
-    ) -> core::result::Result<Self, ::bincode::error::DecodeError> {
-        core::result::Result::Ok(Self {
-            ptr: ::bincode::BorrowDecode::<'_, Context>::borrow_decode(decoder)?,
-            size: ::bincode::BorrowDecode::<'_, Context>::borrow_decode(decoder)?,
-            drop: std::cell::Cell::new(true),
-        })
     }
 }
 
 ///
 #[derive(Debug, Clone)]
 pub struct CpuFrame {
-    pub ptr: *mut c_void,
-    size: usize,
-    layout: Layout,
+    ///
+    pub vec: Arc<Vec<f32>>,
 }
 
-impl From<Frame> for CpuFrame {
-    fn from(gpu_frame: Frame) -> Self {
-        let layout = Layout::from_size_align(gpu_frame.size, 8).expect("Invalid layout");
-        let ptr = unsafe { alloc(layout) };
-
-        if ptr.is_null() {
-            panic!("Allocation failed");
-        }
-
-        let ptr = ptr as *mut c_void;
-
-        unsafe {
-            cuMemcpyDtoH_v2(ptr, gpu_frame.ptr, gpu_frame.size);
-        }
-        CpuFrame {
-            ptr,
-            layout,
-            size: gpu_frame.size,
-        }
+impl From<GPUFrame> for CpuFrame {
+    fn from(gpu_frame: GPUFrame) -> Self {
+        let vec = gpu_frame
+            .ptr
+            .stream()
+            .memcpy_dtov(&(*gpu_frame.ptr))
+            .unwrap();
+        CpuFrame { vec: Arc::new(vec) }
     }
 }
 
-impl Drop for CpuFrame {
-    fn drop(&mut self) {
-        unsafe {
-            dealloc(self.ptr as *mut u8, self.layout);
-        }
-    }
-}
-
-impl CpuFrame {
-    pub fn to_slice(self) -> &'static [u8] {
-        unsafe { std::slice::from_raw_parts(self.ptr as *const u8, self.size) }
+impl PartialEq for CpuFrame {
+    fn eq(&self, other: &Self) -> bool {
+        self.vec.as_ptr() == other.vec.as_ptr()
     }
 }
 
 const MAX_FRM_CNT: usize = 32;
 pub struct DecodeContext {
-    frame_queue: Mutex<VecDeque<Frame>>,
+    frame_queue: Mutex<VecDeque<GPUFrame>>,
     // cuda_device: Arc<CudaDevice>,
     ctx: Arc<CudaContext>,
     cuda_stream: Arc<CudaStream>,
@@ -698,11 +625,15 @@ unsafe extern "C" fn handle_picture_display(
     }
     unsafe { (DECODE_API.unmap_video_frame)((*context).decoder, dp_src_frame) };
 
+    let cuda_slice = (*context)
+        .cuda_stream
+        .upgrade_device_ptr(frame, frame_size as usize);
+
     (*context)
         .frame_queue
         .lock()
         .unwrap()
-        .push_back(Frame::new(frame, frame_size as usize));
+        .push_back(GPUFrame::new(cuda_slice));
 
     1
 }
@@ -791,7 +722,7 @@ impl Decoder {
     }
 
     ///
-    pub fn get_frame(&mut self) -> Option<Frame> {
+    pub fn get_frame(&mut self) -> Option<GPUFrame> {
         unsafe {
             (*self.get_decoder_context())
                 .frame_queue
