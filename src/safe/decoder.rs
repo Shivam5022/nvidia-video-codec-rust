@@ -73,74 +73,9 @@ pub struct Dim {
     pub h: i32,
 }
 
-///
-#[derive(Debug)]
-pub struct GPUFrame {
-    ///
-    pub ptr: Arc<CudaSlice<f32>>,
-}
-
-impl PartialEq for GPUFrame {
-    fn eq(&self, other: &Self) -> bool {
-        other.ptr.device_ptr(other.ptr.stream()).0 == self.ptr.device_ptr(self.ptr.stream()).0
-            && self.ptr.len() == other.ptr.len()
-    }
-}
-
-impl Clone for GPUFrame {
-    fn clone(&self) -> Self {
-        Self {
-            ptr: self.ptr.clone(),
-        }
-    }
-}
-
-impl GPUFrame {
-    ///
-    pub fn new(ptr: CudaSlice<f32>) -> GPUFrame {
-        Self { ptr: Arc::new(ptr) }
-    }
-}
-
-impl From<CpuFrame> for GPUFrame {
-    fn from(cpu_frame: CpuFrame) -> Self {
-        let ctx = CudaContext::new(0).unwrap();
-        let stream = ctx.default_stream();
-        unsafe {
-            let mut dst: CudaSlice<f32> = stream.alloc::<f32>(cpu_frame.vec.len()).unwrap();
-            stream.memcpy_htod(&(*cpu_frame.vec), &mut dst).unwrap();
-            GPUFrame { ptr: Arc::new(dst) }
-        }
-    }
-}
-
-///
-#[derive(Debug, Clone)]
-pub struct CpuFrame {
-    ///
-    pub vec: Arc<Vec<f32>>,
-}
-
-impl From<GPUFrame> for CpuFrame {
-    fn from(gpu_frame: GPUFrame) -> Self {
-        let vec = gpu_frame
-            .ptr
-            .stream()
-            .memcpy_dtov(&(*gpu_frame.ptr))
-            .unwrap();
-        CpuFrame { vec: Arc::new(vec) }
-    }
-}
-
-impl PartialEq for CpuFrame {
-    fn eq(&self, other: &Self) -> bool {
-        self.vec.as_ptr() == other.vec.as_ptr()
-    }
-}
-
 const MAX_FRM_CNT: usize = 32;
 pub struct DecodeContext {
-    frame_queue: Mutex<VecDeque<GPUFrame>>,
+    frame_queue: Mutex<VecDeque<Arc<CudaSlice<f32>>>>,
     // cuda_device: Arc<CudaDevice>,
     ctx: Arc<CudaContext>,
     cuda_stream: Arc<CudaStream>,
@@ -633,7 +568,7 @@ unsafe extern "C" fn handle_picture_display(
         .frame_queue
         .lock()
         .unwrap()
-        .push_back(GPUFrame::new(cuda_slice));
+        .push_back(Arc::new(cuda_slice));
 
     1
 }
@@ -663,13 +598,16 @@ impl Decoder {
         cuda_ctx: Arc<CudaContext>,
         cuda_stream: Arc<CudaStream>,
         codec_type: cudaVideoCodec_enum,
-        resize_info: Dim,
+        resize_info: (i32, i32),
     ) -> Result<Self, DecodeError> {
         let context = Box::new(DecodeContext::new(
             cuda_ctx.clone(),
             cuda_stream.clone(),
             codec_type,
-            resize_info,
+            Dim {
+                w: resize_info.0,
+                h: resize_info.1,
+            },
         ));
         let context: *mut c_void = Box::into_raw(context) as *mut c_void;
         // cuda_device.cu_primary_ctx()
@@ -722,7 +660,7 @@ impl Decoder {
     }
 
     ///
-    pub fn get_frame(&mut self) -> Option<GPUFrame> {
+    pub fn get_frame(&mut self) -> Option<Arc<CudaSlice<f32>>> {
         unsafe {
             (*self.get_decoder_context())
                 .frame_queue
